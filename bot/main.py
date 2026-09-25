@@ -9,13 +9,15 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import ErrorEvent
 
+from bot import runtime
 from bot.config import config
 from bot.fsm_storage import JSONFileStorage
 from bot.logger import setup_logging
 from bot.middlewares.antispam import AntiSpamMiddleware, DebounceMiddleware
 from bot.middlewares.blacklist import BlacklistMiddleware
+from bot.middlewares.user_directory import UserDirectoryMiddleware
 
-from bot.handlers import anketa_form, dm_bridge, moderation, owner, user_start
+from bot.handlers import admin_form, anketa_form, dm_bridge, moderation, owner, user_start
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,9 @@ async def main() -> None:
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    me = await bot.get_me()
+    runtime.bot_username = me.username or ""
+
     storage = JSONFileStorage(config.fsm_file)
     dp = Dispatcher(storage=storage)
 
@@ -45,7 +50,10 @@ async def main() -> None:
     blacklist_mw = BlacklistMiddleware()
     antispam_mw = AntiSpamMiddleware()
     debounce_mw = DebounceMiddleware()
+    user_directory_mw = UserDirectoryMiddleware()
 
+    dp.message.middleware(user_directory_mw)
+    dp.callback_query.middleware(user_directory_mw)
     dp.message.middleware(blacklist_mw)
     dp.callback_query.middleware(blacklist_mw)
     dp.message.middleware(antispam_mw)
@@ -65,9 +73,10 @@ async def main() -> None:
     dp.include_router(moderation.router)
     dp.include_router(user_start.router)
     dp.include_router(anketa_form.router)
+    dp.include_router(admin_form.router)
     dp.include_router(dm_bridge.router)
 
-    logger.info("Бот запускается. Владелец: %s", config.owner_id)
+    logger.info("Бот запускается как @%s. Владелец: %s", runtime.bot_username, config.owner_id)
 
     try:
         await bot.delete_webhook(drop_pending_updates=False)

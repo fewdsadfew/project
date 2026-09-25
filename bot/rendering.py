@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from bot.questions import QUESTION_LABELS
+from bot.questions_admin import ADMIN_QUESTION_LABELS
 from bot.services import anketas as anketas_service
 
 _STATUS_LABELS = {
@@ -13,24 +14,36 @@ _STATUS_LABELS = {
     anketas_service.STATUS_REJECTED: "❌ Отказано",
 }
 
+_KIND_HEADERS = {
+    "regular": ("📝 НОВАЯ АНКЕТА", "📝 АНКЕТА"),
+    "admin": ("🛡 НОВАЯ ЗАЯВКА НА МЛАДШЕГО МОДЕРАТОРА", "🛡 ЗАЯВКА НА МЛАДШЕГО МОДЕРАТОРА"),
+}
+
 
 def _mention(username: str | None, user_id: int) -> str:
     return f"@{username}" if username else f"<a href='tg://user?id={user_id}'>без username</a>"
 
 
+def _labels_for(kind: str) -> Dict[str, str]:
+    return ADMIN_QUESTION_LABELS if kind == "admin" else QUESTION_LABELS
+
+
 def render_admin_card(entry: Dict[str, Any]) -> str:
-    lines = ["📝 <b>НОВАЯ АНКЕТА</b>" if entry["status"] == anketas_service.STATUS_NEW else "📝 <b>АНКЕТА</b>"]
+    kind = entry.get("kind", "regular")
+    new_header, plain_header = _KIND_HEADERS.get(kind, _KIND_HEADERS["regular"])
+    lines = [f"<b>{new_header if entry['status'] == anketas_service.STATUS_NEW else plain_header}</b>"]
     lines.append(f"👤 Пользователь: {_mention(entry.get('username'), entry['user_id'])}")
     lines.append(f"🆔 ID: <code>{entry['user_id']}</code>")
     lines.append("")
 
     answers = entry.get("answers", {})
-    for key, label in QUESTION_LABELS.items():
+    for key, label in _labels_for(kind).items():
         value = answers.get(key, "—")
         lines.append(f"❀ <b>{label}:</b> {value}")
 
-    photos_count = len(entry.get("photos", []))
-    lines.append(f"🖼 Фото скина: {photos_count} шт. (см. сообщение ниже)")
+    if kind == "regular":
+        photos_count = len(entry.get("photos", []))
+        lines.append(f"🖼 Фото скина: {photos_count} шт. (см. сообщение ниже)")
     lines.append("")
 
     status_label = _STATUS_LABELS.get(entry["status"], entry["status"])
@@ -51,5 +64,6 @@ def render_admin_card(entry: Dict[str, Any]) -> str:
         if entry.get("reviewer_username"):
             lines.append(f"👮 Рассматривает: {_mention(entry.get('reviewer_username'), entry['reviewer_id'])}")
 
-    lines.append(f"\n#anketa_{entry['id']}")
+    prefix = "anketa" if kind == "regular" else "adminapp"
+    lines.append(f"\n#{prefix}_{entry['id']}")
     return "\n".join(lines)

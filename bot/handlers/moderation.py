@@ -12,10 +12,22 @@ from bot.config import config
 from bot.keyboards import fix_ack_kb, review_kb
 from bot.rendering import render_admin_card
 from bot.services import anketas as anketas_service
+from bot.services import user_directory
 from bot.services import users as users_service
-from bot.services.settings import set_admin_topic
+from bot.services.settings import (
+    get_admin_apps_topic,
+    set_admin_apps_topic,
+    set_admin_recruitment_open,
+    set_admin_topic,
+)
 from bot.states import FixForm, RejectForm
-from bot.texts import FIX_REQUEST_EXTRA_HINT, NOT_IN_TOPIC, TOPIC_SET
+from bot.texts import (
+    ADMIN_RECRUITMENT_OPEN_BROADCAST,
+    APPROVAL_WITH_LINK_EXTRA,
+    FIX_REQUEST_EXTRA_HINT,
+    NOT_IN_TOPIC,
+    TOPIC_SET,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="moderation")
@@ -39,6 +51,69 @@ async def cmd_settopic(message: Message) -> None:
 
     await set_admin_topic(message.chat.id, message.message_thread_id)
     await message.reply(TOPIC_SET)
+
+
+@router.message(Command("set_admins"))
+async def cmd_set_admins(message: Message) -> None:
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not _is_owner(message.from_user.id):
+        await message.reply("⚠️ Эту команду может использовать только владелец бота.")
+        return
+
+    if not message.is_topic_message or not message.message_thread_id:
+        await message.reply(NOT_IN_TOPIC)
+        return
+
+    await set_admin_apps_topic(message.chat.id, message.message_thread_id)
+    await message.reply("✅ Эта тема установлена для заявок на младшего модератора.")
+
+
+@router.message(Command("open_admin"))
+async def cmd_open_admin(message: Message) -> None:
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not _is_owner(message.from_user.id):
+        await message.reply("⚠️ Эту команду может использовать только владелец бота.")
+        return
+
+    apps_chat_id, apps_topic_id = await get_admin_apps_topic()
+    if not apps_chat_id:
+        await message.reply("Сначала настройте тему заявок командой /set_admins внутри нужной темы.")
+        return
+    if message.chat.id != apps_chat_id or message.message_thread_id != apps_topic_id:
+        await message.reply(NOT_IN_TOPIC)
+        return
+
+    await set_admin_recruitment_open(True)
+    await message.reply("✅ Набор на младшего модератора открыт. Рассылаю уведомление...")
+
+    ids = await user_directory.all_known_ids()
+    sent = 0
+    for uid in ids:
+        try:
+            await message.bot.send_message(uid, ADMIN_RECRUITMENT_OPEN_BROADCAST)
+            sent += 1
+        except Exception:
+            pass
+    await message.reply(f"📨 Рассылка завершена: доставлено {sent} из {len(ids)}.")
+
+
+@router.message(Command("close_admin"))
+async def cmd_close_admin(message: Message) -> None:
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not _is_owner(message.from_user.id):
+        await message.reply("⚠️ Эту команду может использовать только владелец бота.")
+        return
+
+    apps_chat_id, apps_topic_id = await get_admin_apps_topic()
+    if apps_chat_id and (message.chat.id != apps_chat_id or message.message_thread_id != apps_topic_id):
+        await message.reply(NOT_IN_TOPIC)
+        return
+
+    await set_admin_recruitment_open(False)
+    await message.reply("🚫 Набор на младшего модератора закрыт.")
 
 
 @router.callback_query(F.data.startswith("take:"))
@@ -128,10 +203,20 @@ async def cb_approve(callback: CallbackQuery) -> None:
     entry = result["entry"]
     await callback.answer("Анкета одобрена.")
     await sync_cards(callback.bot, entry, None)
-    await users_service.start_cooldown(entry["user_id"], config.cooldown_days)
+
+    kind = entry.get("kind", "regular")
+    if kind != "admin":
+        await users_service.start_cooldown(entry["user_id"], config.cooldown_days)
+
+    if kind == "admin":
+        approve_text = "✅ Ваша заявка на пост младшего модератора одобрена! С вами свяжется руководство."
+    else:
+        approve_text = "✅ Ваша анкета одобрена! Добро пожаловать."
+        if config.approval_invite_link:
+            approve_text += APPROVAL_WITH_LINK_EXTRA.format(link=config.approval_invite_link)
 
     try:
-        await callback.bot.send_message(entry["user_id"], "✅ Ваша анкета одобрена! Добро пожаловать.")
+        await callback.bot.send_message(entry["user_id"], approve_text)
     except Exception:
         logger.warning("Не удалось уведомить пользователя %s об одобрении", entry["user_id"])
 
@@ -169,13 +254,19 @@ async def process_reject_reason(message: Message, state: FSMContext) -> None:
 
     entry = result["entry"]
     await sync_cards(message.bot, entry, None)
-    await users_service.start_cooldown(entry["user_id"], config.cooldown_days)
+    if entry.get("kind", "regular") != "admin":
+        await users_service.start_cooldown(entry["user_id"], config.cooldown_days)
     await message.reply(f"Анкета #{anketa_id} отклонена.")
 
+    reject_text = (
+        "❌ Ваша заявка на пост младшего модератора отклонена."
+        if entry.get("kind") == "admin"
+        else "❌ Ваша анкета отклонена."
+    )
     try:
         await message.bot.send_message(
             entry["user_id"],
-            f"❌ Ваша анкета отклонена.\n💬 Причина: {entry['reject_reason']}",
+            f"{reject_text}\n💬 Причина: {entry['reject_reason']}",
         )
     except Exception:
         logger.warning("Не удалось уведомить пользователя %s об отказе", entry["user_id"])

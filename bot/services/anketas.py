@@ -27,6 +27,7 @@ async def create_anketa(
     full_name: str,
     answers: Dict[str, str],
     photos: List[str],
+    kind: str = "regular",
 ) -> Dict[str, Any]:
     holder: Dict[str, Any] = {}
 
@@ -42,6 +43,7 @@ async def create_anketa(
             "full_name": full_name,
             "answers": answers,
             "photos": photos,
+            "kind": kind,
             "status": STATUS_NEW,
             "reviewer_id": None,
             "reviewer_username": None,
@@ -67,16 +69,22 @@ async def get_anketa(anketa_id: str) -> Optional[Dict[str, Any]]:
     return data.get("items", {}).get(str(anketa_id))
 
 
-async def get_active_for_user(user_id: int) -> Optional[Dict[str, Any]]:
+async def get_active_for_user(user_id: int, kind: Optional[str] = None) -> Optional[Dict[str, Any]]:
     data = await _store.read()
+    matches = []
     for entry in data.get("items", {}).values():
-        if entry["user_id"] == user_id and entry["status"] in (
-            STATUS_NEW,
-            STATUS_REVIEW,
-            STATUS_FIX_REQUIRED,
-        ):
-            return entry
-    return None
+        if entry["user_id"] != user_id:
+            continue
+        if entry["status"] not in (STATUS_NEW, STATUS_REVIEW, STATUS_FIX_REQUIRED):
+            continue
+        if kind is not None and entry.get("kind", "regular") != kind:
+            continue
+        matches.append(entry)
+    if not matches:
+        return None
+    # Если у пользователя одновременно есть и анкета, и заявка на модератора —
+    # берём самую свежую (на практике такое пересечение редкость).
+    return max(matches, key=lambda e: int(e["id"]))
 
 
 async def get_last_for_user(user_id: int) -> Optional[Dict[str, Any]]:

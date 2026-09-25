@@ -8,11 +8,10 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.card_sync import sync_cards
+from bot.card_sync import post_new_anketa, sync_cards
 from bot.config import config
-from bot.keyboards import age_kb, cooldown_reset_kb, main_menu_kb, moderation_kb, photos_kb, review_kb
+from bot.keyboards import age_kb, cooldown_reset_kb, main_menu_kb, photos_kb, review_kb
 from bot.questions import QUESTIONS, TOTAL_STEPS
-from bot.rendering import render_admin_card
 from bot.services import anketas as anketas_service
 from bot.services import users as users_service
 from bot.services.settings import get_admin_topic, increment_total_submitted
@@ -123,7 +122,7 @@ async def cb_submit_anketa(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     user_id = callback.from_user.id
 
-    active = await anketas_service.get_active_for_user(user_id)
+    active = await anketas_service.get_active_for_user(user_id, kind="regular")
     if active:
         await callback.message.answer(ALREADY_PENDING)
         return
@@ -265,61 +264,14 @@ async def _finalize_anketa(bot: Bot, from_user, state: FSMContext) -> None:
         full_name=from_user.full_name,
         answers=answers,
         photos=photos,
+        kind="regular",
     )
     await users_service.set_active_anketa(from_user.id, entry["id"])
     await increment_total_submitted()
 
     await bot.send_message(chat_id, SUBMIT_SUCCESS, reply_markup=main_menu_kb())
 
-    await _post_to_admin_topic(bot, entry)
-
-
-async def _post_to_admin_topic(bot: Bot, entry: dict) -> None:
-    admin_chat_id, admin_topic_id = await get_admin_topic()
-    if not admin_chat_id:
-        logger.warning(
-            "Админ-тема не настроена (/settopic) — анкета #%s не отправлена администрации",
-            entry["id"],
-        )
-        return
-
-    try:
-        card_msg = await bot.send_message(
-            admin_chat_id,
-            render_admin_card(entry),
-            message_thread_id=admin_topic_id,
-            reply_markup=moderation_kb(entry["id"]),
-        )
-        await anketas_service.set_admin_message(entry["id"], admin_chat_id, card_msg.message_id)
-
-        photos = entry.get("photos", [])
-        if photos:
-            if len(photos) == 1:
-                await bot.send_photo(
-                    admin_chat_id,
-                    photos[0],
-                    message_thread_id=admin_topic_id,
-                    caption=f"🖼 Фото скина к анкете #{entry['id']}",
-                    reply_to_message_id=card_msg.message_id,
-                )
-            else:
-                from aiogram.types import InputMediaPhoto
-
-                media = [
-                    InputMediaPhoto(
-                        media=photo_id,
-                        caption=f"🖼 Фото скина к анкете #{entry['id']}" if i == 0 else None,
-                    )
-                    for i, photo_id in enumerate(photos)
-                ]
-                await bot.send_media_group(
-                    admin_chat_id,
-                    media,
-                    message_thread_id=admin_topic_id,
-                    reply_to_message_id=card_msg.message_id,
-                )
-    except Exception:
-        logger.exception("Не удалось отправить анкету #%s в админ-тему", entry["id"])
+    await post_new_anketa(bot, entry)
 
 
 async def resolve_fix(bot: Bot, anketa_id: str, extra_note: str | None = None) -> bool:

@@ -7,6 +7,7 @@ from bot.questions import AGE_OPTIONS
 def main_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Подать анкету", callback_data="submit_anketa")
+    builder.button(text="🛡 Подать на пост мл. модератора", callback_data="submit_admin_app")
     builder.button(text="❓ Помощь в подаче анкеты", callback_data="show_help")
     builder.adjust(1)
     return builder.as_markup()

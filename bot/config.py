@@ -28,6 +28,7 @@ class Config:
     bot_token: str
     owner_id: int
     admin_contact: str
+    approval_invite_link: str
     banner: str
     help_gif: str
     stickers: List[str]
@@ -57,6 +58,10 @@ class Config:
     def fsm_file(self) -> Path:
         return self.data_dir / "fsm_storage.json"
 
+    @property
+    def user_directory_file(self) -> Path:
+        return self.data_dir / "user_directory.json"
+
 
 def load_config() -> Config:
     bot_token = os.getenv("BOT_TOKEN", "").strip()
@@ -79,6 +84,7 @@ def load_config() -> Config:
         bot_token=bot_token,
         owner_id=owner_id,
         admin_contact=os.getenv("ADMIN_CONTACT", "@notrightuser").strip(),
+        approval_invite_link=os.getenv("APPROVAL_INVITE_LINK", "").strip(),
         banner=os.getenv("BANNER_IMAGE", "").strip(),
         help_gif=os.getenv("HELP_GIF", "").strip(),
         stickers=_split_stickers(os.getenv("QUESTION_STICKERS", "")),
